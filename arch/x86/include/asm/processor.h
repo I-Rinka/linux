@@ -534,6 +534,7 @@ struct thread_struct {
 	 */
 	unsigned long		iopl_emul;
 
+	unsigned int		iopl_warn:1;
 	unsigned int		sig_on_uaccess_err:1;
 
 	/* Floating point and extended processor state */
@@ -551,15 +552,6 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 	*offset = offsetof(struct thread_struct, fpu.state);
 	*size = fpu_kernel_xstate_size;
 }
-
-/*
- * Thread-synchronous status.
- *
- * This is different from the flags in that nobody else
- * ever touches our thread-synchronous status, so we don't
- * have to worry about atomic accesses.
- */
-#define TS_COMPAT		0x0002	/* 32bit syscall active (64BIT)*/
 
 static inline void
 native_load_sp0(unsigned long sp0)
@@ -690,6 +682,7 @@ extern void load_direct_gdt(int);
 extern void load_fixmap_gdt(int);
 extern void load_percpu_segment(int);
 extern void cpu_init(void);
+extern void cpu_init_secondary(void);
 extern void cpu_init_exception_handling(void);
 extern void cr4_init(void);
 
@@ -846,8 +839,9 @@ bool xen_set_default_idle(void);
 #define xen_set_default_idle 0
 #endif
 
-void stop_this_cpu(void *dummy);
-void microcode_check(void);
+void __noreturn stop_this_cpu(void *dummy);
+void microcode_check(struct cpuinfo_x86 *prev_info);
+void store_cpu_caps(struct cpuinfo_x86 *info);
 
 enum l1tf_mitigations {
 	L1TF_MITIGATION_OFF,

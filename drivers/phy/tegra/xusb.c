@@ -688,7 +688,7 @@ static int tegra_xusb_setup_usb_role_switch(struct tegra_xusb_port *port)
 	 * reference to retrieve usb-phy details.
 	 */
 	port->usb_phy.dev = &lane->pad->lanes[port->index]->dev;
-	port->usb_phy.dev->driver = port->padctl->dev->driver;
+	port->usb_phy.dev->driver = port->dev.driver;
 	port->usb_phy.otg->usb_phy = &port->usb_phy;
 	port->usb_phy.otg->set_peripheral = tegra_xusb_set_peripheral;
 	port->usb_phy.otg->set_host = tegra_xusb_set_host;
@@ -775,6 +775,7 @@ static int tegra_xusb_add_usb2_port(struct tegra_xusb_padctl *padctl,
 	usb2->base.lane = usb2->base.ops->map(&usb2->base);
 	if (IS_ERR(usb2->base.lane)) {
 		err = PTR_ERR(usb2->base.lane);
+		tegra_xusb_port_unregister(&usb2->base);
 		goto out;
 	}
 
@@ -841,6 +842,7 @@ static int tegra_xusb_add_ulpi_port(struct tegra_xusb_padctl *padctl,
 	ulpi->base.lane = ulpi->base.ops->map(&ulpi->base);
 	if (IS_ERR(ulpi->base.lane)) {
 		err = PTR_ERR(ulpi->base.lane);
+		tegra_xusb_port_unregister(&ulpi->base);
 		goto out;
 	}
 

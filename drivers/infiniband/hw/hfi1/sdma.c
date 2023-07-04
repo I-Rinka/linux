@@ -880,8 +880,8 @@ struct sdma_engine *sdma_select_user_engine(struct hfi1_devdata *dd,
 	if (current->nr_cpus_allowed != 1)
 		goto out;
 
-	cpu_id = smp_processor_id();
 	rcu_read_lock();
+	cpu_id = smp_processor_id();
 	rht_node = rhashtable_lookup(dd->sdma_rht, &cpu_id,
 				     sdma_rht_params);
 
@@ -1330,11 +1330,13 @@ void sdma_clean(struct hfi1_devdata *dd, size_t num_engines)
 		kvfree(sde->tx_ring);
 		sde->tx_ring = NULL;
 	}
-	spin_lock_irq(&dd->sde_map_lock);
-	sdma_map_free(rcu_access_pointer(dd->sdma_map));
-	RCU_INIT_POINTER(dd->sdma_map, NULL);
-	spin_unlock_irq(&dd->sde_map_lock);
-	synchronize_rcu();
+	if (rcu_access_pointer(dd->sdma_map)) {
+		spin_lock_irq(&dd->sde_map_lock);
+		sdma_map_free(rcu_access_pointer(dd->sdma_map));
+		RCU_INIT_POINTER(dd->sdma_map, NULL);
+		spin_unlock_irq(&dd->sde_map_lock);
+		synchronize_rcu();
+	}
 	kfree(dd->per_sdma);
 	dd->per_sdma = NULL;
 
@@ -1633,22 +1635,7 @@ static inline void sdma_unmap_desc(
 	struct hfi1_devdata *dd,
 	struct sdma_desc *descp)
 {
-	switch (sdma_mapping_type(descp)) {
-	case SDMA_MAP_SINGLE:
-		dma_unmap_single(
-			&dd->pcidev->dev,
-			sdma_mapping_addr(descp),
-			sdma_mapping_len(descp),
-			DMA_TO_DEVICE);
-		break;
-	case SDMA_MAP_PAGE:
-		dma_unmap_page(
-			&dd->pcidev->dev,
-			sdma_mapping_addr(descp),
-			sdma_mapping_len(descp),
-			DMA_TO_DEVICE);
-		break;
-	}
+	system_descriptor_complete(dd, descp);
 }
 
 /*
@@ -3055,6 +3042,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 static int _extend_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 {
 	int i;
+	struct sdma_desc *descp;
 
 	/* Handle last descriptor */
 	if (unlikely((tx->num_desc == (MAX_DESC - 1)))) {
@@ -3075,12 +3063,10 @@ static int _extend_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 	if (unlikely(tx->num_desc == MAX_DESC))
 		goto enomem;
 
-	tx->descp = kmalloc_array(
-			MAX_DESC,
-			sizeof(struct sdma_desc),
-			GFP_ATOMIC);
-	if (!tx->descp)
+	descp = kmalloc_array(MAX_DESC, sizeof(struct sdma_desc), GFP_ATOMIC);
+	if (!descp)
 		goto enomem;
+	tx->descp = descp;
 
 	/* reserve last descriptor for coalescing */
 	tx->desc_limit = MAX_DESC - 1;
@@ -3169,7 +3155,7 @@ int ext_coal_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx,
 
 		/* Add descriptor for coalesce buffer */
 		tx->desc_limit = MAX_DESC;
-		return _sdma_txadd_daddr(dd, SDMA_MAP_SINGLE, tx,
+		return _sdma_txadd_daddr(dd, SDMA_MAP_SINGLE, NULL, tx,
 					 addr, tx->tlen);
 	}
 
@@ -3209,10 +3195,12 @@ int _pad_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 			return rval;
 		}
 	}
+
 	/* finish the one just added */
 	make_tx_sdma_desc(
 		tx,
 		SDMA_MAP_NONE,
+		NULL,
 		dd->sdma_pad_phys,
 		sizeof(u32) - (tx->packet_len & (sizeof(u32) - 1)));
 	_sdma_close_tx(dd, tx);
